@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab Temp Calculator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+  .container {
+    width: 100%;
+    max-width: 420px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    text-align: center;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 4px;
+  }
+  input {
+    width: 100%;
+    padding: 12px;
+    font-size: 1.1rem;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #16213e;
+    color: #fff;
+    outline: none;
+  }
+  input:focus {
+    border-color: #0f3460;
+    box-shadow: 0 0 0 2px rgba(15, 52, 96, 0.5);
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+  }
+  .row .field {
+    flex: 1;
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    background: #0f3460;
+    color: #fff;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:active {
+    background: #0a2647;
+  }
+  #result {
+    margin-top: 24px;
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    display: none;
+  }
+  #result.green { background: #1b4332; border: 1px solid #2d6a4f; }
+  #result.yellow { background: #3a3000; border: 1px solid #665500; }
+  #result.red { background: #3d0000; border: 1px solid #660000; }
+  #result .main-answer {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  #result .detail {
+    font-size: 0.9rem;
+    color: #ccc;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Lab Temp Calculator</h1>
+
+  <div class="field">
+    <label>Current temp (&deg;F)</label>
+    <input type="number" id="currentTemp" step="0.1" placeholder="e.g. 72">
+  </div>
+
+  <div class="field">
+    <label>Current time</label>
+    <input type="time" id="currentTime">
+  </div>
+
+  <div class="field">
+    <label>Drop rate (&deg;F/hr) &mdash; how fast it's cooling</label>
+    <input type="number" id="dropRate" step="0.1" placeholder="e.g. 1.0">
+  </div>
+
+  <div class="field">
+    <label>Rise rate (&deg;F/hr) &mdash; once heater is on</label>
+    <input type="number" id="riseRate" step="0.1" value="2.25">
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label>Target temp (&deg;F)</label>
+      <input type="number" id="targetTemp" step="0.1" value="79.5">
+    </div>
+    <div class="field">
+      <label>Target time</label>
+      <input type="time" id="targetTime" value="00:00">
+    </div>
+  </div>
+
+  <button onclick="calculate()">Calculate</button>
+
+  <div id="result">
+    <div class="main-answer" id="mainAnswer"></div>
+    <div class="detail" id="detail"></div>
+  </div>
+</div>
+
+<script>
+// Auto-fill current time
+(function() {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('currentTime').value = hh + ':' + mm;
+})();
+
+function parseTime(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h + m / 60; // hours since midnight
+}
+
+function formatTime(hoursDecimal) {
+  // Normalize to 0-24
+  hoursDecimal = ((hoursDecimal % 24) + 24) % 24;
+  const h = Math.floor(hoursDecimal);
+  const m = Math.round((hoursDecimal - h) * 60);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return h12 + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+function hoursUntil(fromHours, toHours) {
+  let diff = toHours - fromHours;
+  if (diff <= 0) diff += 24; // target is next day
+  return diff;
+}
+
+function calculate() {
+  const currentTemp = parseFloat(document.getElementById('currentTemp').value);
+  const currentTimeStr = document.getElementById('currentTime').value;
+  const dropRate = parseFloat(document.getElementById('dropRate').value);
+  const riseRate = parseFloat(document.getElementById('riseRate').value);
+  const targetTemp = parseFloat(document.getElementById('targetTemp').value);
+  const targetTimeStr = document.getElementById('targetTime').value;
+
+  if ([currentTemp, dropRate, riseRate, targetTemp].some(isNaN) || !currentTimeStr || !targetTimeStr) {
+    showResult('red', 'Missing info', 'Fill in all fields.');
+    return;
+  }
+  if (riseRate <= 0) {
+    showResult('red', 'Bad rise rate', 'Rise rate must be positive.');
+    return;
+  }
+
+  const nowH = parseTime(currentTimeStr);
+  const targetH = parseTime(targetTimeStr);
+  const H = hoursUntil(nowH, targetH);
+
+  // Calculate for a range: target temp as given, and +/- 0.5 for a window
+  const lowTarget = targetTemp - 0.5;
+  const highTarget = targetTemp + 0.5;
+
+  // h = (T_now + riseRate * H - T_target) / (dropRate + riseRate)
+  const hLow = (currentTemp + riseRate * H - highTarget) / (dropRate + riseRate);
+  const hHigh = (currentTemp + riseRate * H - lowTarget) / (dropRate + riseRate);
+
+  // What happens if turned on right now?
+  const tempIfNow = currentTemp + riseRate * H;
+
+  // What happens if never turned on (all drop)?
+  const tempIfNever = currentTemp - dropRate * H;
+
+  const resultEl = document.getElementById('result');
+
+  if (tempIfNow < lowTarget) {
+    // Even turning on right now won't reach target
+    const shortfall = lowTarget - tempIfNow;
+    showResult('red',
+      'Too late!',
+      'Even turning on the heater right now, the temp would only reach ' +
+      tempIfNow.toFixed(1) + '°F by ' + formatTime(targetH) +
+      ' (' + shortfall.toFixed(1) + '° short).'
+    );
+    return;
+  }
+
+  if (hHigh <= 0) {
+    // Need to turn it on now or already past the window
+    const predicted = currentTemp + riseRate * H;
+    if (predicted > highTarget) {
+      showResult('yellow',
+        'Turn it on NOW',
+        'You\'re cutting it close. Predicted temp at ' + formatTime(targetH) +
+        ': ' + predicted.toFixed(1) + '°F (may overshoot by ' +
+        (predicted - highTarget).toFixed(1) + '°).'
+      );
+    } else {
+      showResult('yellow',
+        'Turn it on NOW',
+        'Predicted temp at ' + formatTime(targetH) + ': ' + predicted.toFixed(1) + '°F.'
+      );
+    }
+    return;
+  }
+
+  // Normal case — there's a window
+  const turnOnEarly = nowH + hLow;
+  const turnOnLate = nowH + hHigh;
+
+  const earlyStr = formatTime(turnOnEarly);
+  const lateStr = formatTime(turnOnLate);
+
+  // How tight is the window?
+  const windowMinutes = (hHigh - hLow) * 60;
+
+  let color = 'green';
+  if (hLow < 0.5) color = 'yellow'; // less than 30 min from now
+
+  // Also show what temp it'll be when she turns it on
+  const tempAtTurnOnLow = currentTemp - dropRate * hLow;
+  const tempAtTurnOnHigh = currentTemp - dropRate * hHigh;
+
+  let detail = 'Turn on between <b>' + earlyStr + '</b> and <b>' + lateStr + '</b>';
+  detail += ' (window: ' + Math.round(windowMinutes) + ' min).';
+  detail += '<br>Temp at turn-on: ~' + tempAtTurnOnHigh.toFixed(1) + '–' + tempAtTurnOnLow.toFixed(1) + '°F.';
+  detail += '<br>Target: ' + lowTarget.toFixed(0) + '–' + highTarget.toFixed(0) + '°F by ' + formatTime(targetH) + '.';
+
+  showResult(color,
+    earlyStr + ' – ' + lateStr,
+    detail
+  );
+}
+
+function showResult(color, main, detail) {
+  const el = document.getElementById('result');
+  el.className = color;
+  el.style.display = 'block';
+  document.getElementById('mainAnswer').textContent = main;
+  document.getElementById('detail').innerHTML = detail;
+}
+</script>
+</body>
+</html>
